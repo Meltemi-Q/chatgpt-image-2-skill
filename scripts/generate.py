@@ -198,56 +198,128 @@ def cmd_setup():
     print("\n配置完成。跑 `python3 generate.py doctor` 验证。")
 
 
+def _api_base(api_url):
+    """从 `.../v1/images/generations` 抠出 `scheme://host[:port]`"""
+    from urllib.parse import urlparse
+    p = urlparse(api_url)
+    return f"{p.scheme}://{p.netloc}" if p.scheme and p.netloc else ""
+
+
+def _check_healthz(base, timeout=10):
+    """返回 (ok, detail)。detail 含 status code + body 或错误原因。"""
+    try:
+        with urlopen(Request(f"{base}/healthz"), timeout=timeout) as resp:
+            body = resp.read().decode("utf-8", errors="replace")[:200]
+            return resp.status == 200, f"{resp.status} {body.strip()}"
+    except HTTPError as e:
+        return False, f"HTTP {e.code}"
+    except URLError as e:
+        return False, f"{e.reason}"
+    except Exception as e:
+        return False, str(e)
+
+
+def _check_models(base, api_key, timeout=10):
+    """返回 (ok, models_list_or_error)."""
+    try:
+        req = Request(f"{base}/v1/models",
+                      headers={"Authorization": f"Bearer {api_key}"})
+        with urlopen(req, timeout=timeout) as resp:
+            data = json.loads(resp.read().decode("utf-8"))
+            models = [m.get("id") for m in data.get("data", []) if m.get("id")]
+            return True, models
+    except HTTPError as e:
+        return False, f"HTTP {e.code}: {e.read().decode('utf-8', errors='replace')[:200]}"
+    except URLError as e:
+        return False, f"{e.reason}"
+    except Exception as e:
+        return False, str(e)
+
+
 def cmd_doctor():
-    print("## CLIProxyAPI 网关连通性检查\n")
+    print("## 网关诊断（分级检查）\n")
 
     api_key = get_api_key()
     api_url = get_api_url()
 
-    ok_key = bool(api_key)
-    print(f"- API key: {'✅ 已配置' if ok_key else '❌ 未找到'}")
-    if not ok_key:
-        print("   → 跑 `python3 generate.py setup` 配置\n")
-    elif len(api_key) < 20:
-        print(f"   ⚠️  api_key 看起来太短（{len(api_key)} 字符），怀疑被截断")
-
+    # Stage 0: 配置在不在
+    print("### 0. 配置")
+    print(f"- API key: {'✅ 已配置 (' + api_key[:12] + '...)' if api_key else '❌ 未找到'}")
+    if api_key and len(api_key) < 20:
+        print(f"   ⚠️  key 只有 {len(api_key)} 字符，怀疑被截断")
     print(f"- API URL: {api_url}")
-
-    if not ok_key:
-        print("\n" + setup_instructions())
+    if not api_key:
+        print("\n→ 跑 `python3 generate.py setup` 配置\n")
+        print(setup_instructions())
         sys.exit(2)
 
-    # 试一次最小请求
-    print("\n## 发起测试请求\n")
-    print(f"POST {api_url}")
-    print("  {\"model\":\"gpt-image-2\",\"prompt\":\"a single red dot on white\"}")
+    base = _api_base(api_url)
+    if not base:
+        print(f"\n❌ URL 格式不对，无法解析出 host：{api_url}")
+        sys.exit(3)
+
+    # Stage 1: 网关活着没
+    print("\n### 1. 网关连通性（GET /healthz）")
+    ok, detail = _check_healthz(base)
+    if ok:
+        print(f"✅ {base}/healthz → {detail}")
+    else:
+        print(f"❌ {base}/healthz → {detail}")
+        print("   → 网关没开 / URL 写错 / 网络不通。先修这个。")
+        sys.exit(3)
+
+    # Stage 2: 鉴权 + 模型列表（含 gpt-image-2？）
+    print("\n### 2. 模型列表 + 鉴权（GET /v1/models）")
+    ok, result = _check_models(base, api_key)
+    if not ok:
+        print(f"❌ {result}")
+        if "401" in result:
+            print("   → api_key 不对。跑 `setup` 重新配置。")
+        elif "403" in result:
+            print("   → api_key 格式对但没权限。问网关管理员确认这个 key 启用了。")
+        else:
+            print("   → 鉴权或其他错误。检查网关 config.yaml 的 api-keys。")
+        sys.exit(3)
+
+    models = result
+    has_model = MODEL in models
+    print(f"✅ 拿到 {len(models)} 个模型")
+    print(f"   {'✅' if has_model else '❌'} {MODEL} {'在列' if has_model else '不在列'}")
+    if not has_model:
+        print(f"\n   可用模型：{', '.join(models[:10])}{'...' if len(models) > 10 else ''}")
+        print(f"   → 网关版本可能过旧，不支持 {MODEL}。建议 CLIProxyAPI ≥ v6.9.35。")
+        print("   → 或者 config.yaml 的 oauth-model-alias 没开 gpt-image-2 路由。")
+        sys.exit(3)
+
+    # Stage 3: 端到端生成（软检查，120s 上限；失败不 exit 只 warn）
+    print("\n### 3. 端到端生成（POST /v1/images/generations，120s 上限）")
+    print(f"   payload: {{\"model\":\"{MODEL}\",\"prompt\":\"a single red dot on white\"}}")
     try:
         t0 = time.time()
-        resp = call_api(api_url, api_key, "a single red dot on white", None, timeout=60)
+        resp = call_api(api_url, api_key, "a single red dot on white", None, timeout=120)
         elapsed = time.time() - t0
         png, err = extract_png(resp)
         if err:
             print(f"⚠️  调用成功但无法提取图：{err}")
-            sys.exit(3)
-        print(f"✅ 生成成功（{len(png)/1024:.0f}KB, {elapsed:.1f}s）")
-        print("   网关工作正常，skill 可以用。")
+            return
+        print(f"✅ 生成成功（{len(png)/1024:.0f}KB, {elapsed:.1f}s）—— 全链路可用")
     except HTTPError as e:
         body = e.read().decode("utf-8", errors="replace")[:400]
-        print(f"❌ HTTP {e.code}: {body}")
-        if e.code == 401:
-            print("   → API key 不对。核对一下，跑 `setup` 重新配置。")
-        elif e.code == 502 and "stream disconnected" in body:
-            print("   → 网关服务在，但 upstream 画图失败。请确认 CLIProxyAPI 是 v6.9.35+（含 gpt-image-2 支持）。")
-        elif e.code == 404:
-            print("   → URL 路径不对。确认 URL 末尾是 `/v1/images/generations`。")
-        sys.exit(3)
+        print(f"⚠️  HTTP {e.code}: {body}")
+        if e.code == 502 and "stream disconnected" in body:
+            print("   → 网关 + 模型都 OK，但 upstream 画图失败。可能原因：")
+            print("     · CLIProxyAPI 版本 < v6.9.35（gpt-image-2 注入逻辑缺失）")
+            print("     · OAuth token 过期 / 账号订阅问题")
+        elif e.code == 400:
+            print("   → 参数被 upstream 拒绝（prompt 过滤、size 越界等）")
+        print("\n注：前三级都过，核心配置没问题。真实生成（默认无限等）可能仍成功。")
     except URLError as e:
-        print(f"❌ 连不上：{e.reason}")
-        print("   → 网关 URL 打错了 / 网关服务没开 / 网络问题。检查 URL 对应的机器上是否有监听这个端口。")
-        sys.exit(3)
+        print(f"⚠️  {e.reason}")
+        print("注：前三级都过，链路偶发慢不代表坏。")
     except Exception as e:
-        print(f"❌ 未知错误：{e}")
-        sys.exit(3)
+        # TLS EOF / socket timeout / ... —— 公网链路偶发抖动，不判死
+        print(f"⚠️  {e}")
+        print("注：前三级都过，upstream 可能慢；真实生成用默认无限等，通常仍会成功。")
 
 
 # ─────────────── 主生成流程 ───────────────

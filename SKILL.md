@@ -44,7 +44,14 @@ python3 <SKILL_DIR>/scripts/generate.py doctor     # 检查配置 + 连通性
 python3 <SKILL_DIR>/scripts/generate.py setup      # 交互式配置
 ```
 
-`doctor` 检测：API key 是否配置 / URL 是否连通 / 后端是否能真实出图。按错误类型给修复指引（401/404/502/超时 等）。
+`doctor` 分 **4 级**检查，失败在哪一级就知道问题在哪：
+
+1. **配置** — api_key / api_url 在不在
+2. **网关连通性** — `GET /healthz` 是否返 `{"status":"ok"}`（不需 key）
+3. **模型可见性** — `GET /v1/models` 鉴权 OK 且含 `gpt-image-2`
+4. **端到端生成** — 真的画一张红点（120s 上限）
+
+前三级硬检查（失败直接 exit + 指引），第四级软检查 —— 偶发网络抖动不判死，因为前三级已经证明配置正确。
 
 `setup` 引导填：
 - `api_key`（从网关管理员处获取）
