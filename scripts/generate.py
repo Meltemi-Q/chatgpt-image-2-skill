@@ -84,7 +84,8 @@ def resolve_size(size_str):
     return SIZE_PRESETS.get(lower, size_str)
 
 
-def call_api(api_url, api_key, prompt, size_px, timeout=180):
+def call_api(api_url, api_key, prompt, size_px, timeout=None):
+    """timeout=None → 无限等待（生成默认 10-60s，公网链路/upstream 抖动可能更久）"""
     payload = {"model": MODEL, "prompt": prompt}
     if size_px:
         payload["size"] = size_px
@@ -99,6 +100,21 @@ def call_api(api_url, api_key, prompt, size_px, timeout=180):
     )
     with urlopen(req, timeout=timeout) as resp:
         return json.loads(resp.read().decode("utf-8"))
+
+
+def resolve_timeout(cli_value):
+    """优先级：CLI --timeout > env CHATGPT_IMAGE_TIMEOUT > None（无限等）。
+    任何 ≤0 的值也视为无限。"""
+    if cli_value is not None:
+        return None if cli_value <= 0 else cli_value
+    env = os.environ.get("CHATGPT_IMAGE_TIMEOUT")
+    if env:
+        try:
+            n = int(env)
+            return None if n <= 0 else n
+        except ValueError:
+            pass
+    return None
 
 
 def extract_png(response):
@@ -237,7 +253,7 @@ def cmd_doctor():
 # ─────────────── 主生成流程 ───────────────
 
 
-def generate_image(prompt, size=None, batch=1):
+def generate_image(prompt, size=None, batch=1, timeout=None):
     api_key = get_api_key()
     if not api_key:
         print("## 缺少 API key\n")
@@ -256,6 +272,7 @@ def generate_image(prompt, size=None, batch=1):
     print(f"- **模型**: {MODEL}")
     print(f"- **提示词**: {prompt}")
     print(f"- **尺寸**: {size_px or '模型自选'}")
+    print(f"- **超时**: {'不限' if timeout is None else f'{timeout}s'}")
     if batch > 1:
         print(f"- **数量**: {batch} 张")
     print()
@@ -265,7 +282,7 @@ def generate_image(prompt, size=None, batch=1):
         save_path = os.path.join(workspace, make_filename(prompt, idx))
 
         try:
-            response = call_api(api_url, api_key, prompt, size_px)
+            response = call_api(api_url, api_key, prompt, size_px, timeout=timeout)
         except HTTPError as e:
             err_body = e.read().decode("utf-8", errors="replace")
             return (None, f"HTTP {e.code}: {err_body[:400]}", 0)
@@ -374,6 +391,8 @@ def main():
                         help="preset (square/landscape/portrait/wide/tall), raw WxH (e.g. 1792x1024), or omit for model default")
     parser.add_argument("--batch", "-b", type=int, default=1,
                         help="Generate N images in parallel (1-4, default: 1)")
+    parser.add_argument("--timeout", "-t", type=int, default=None,
+                        help="请求超时（秒）。省略或 ≤0 → 不设限（默认，生成可能较慢）。也可用环境变量 CHATGPT_IMAGE_TIMEOUT。")
 
     args = parser.parse_args()
 
@@ -392,6 +411,7 @@ def main():
         prompt=args.prompt,
         size=args.size,
         batch=max(1, min(args.batch, 4)),
+        timeout=resolve_timeout(args.timeout),
     )
 
 
