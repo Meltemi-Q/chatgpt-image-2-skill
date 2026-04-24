@@ -81,11 +81,13 @@ export CHATGPT_IMAGE_API_URL='https://your-gateway.example.com/v1/images/generat
 
 原生尺寸直接传：`-s 1280x720`、`-s 2048x2048`。
 
-## 耗时
+## 耗时 / 超时
 
 - 单张 12-25s，1024×1024 约 1.4MB PNG
-- 默认超时 180s；upstream 偶发 500 直接重试
+- **默认不设超时**（None）—— 生成偶尔会超过 60s，设限反而打断有效请求
+- 想加安全阀：`-t 300` 或环境变量 `CHATGPT_IMAGE_TIMEOUT=300`（秒，≤0 视作无限）
 - 本机 loopback 最快，远程走公网会多几秒
+- `doctor` 子命令固定 60s 超时（连通性测试，不通就是不通）
 
 ## 子命令
 
