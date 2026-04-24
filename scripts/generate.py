@@ -150,12 +150,12 @@ def setup_instructions():
         "**A. 使用现有网关**（有人共享了 key）\n"
         "   问对方要 API key 和网关 URL，跑 `python3 generate.py setup` 填进去即可。\n\n"
         "**B. 自建网关**（自己有 ChatGPT Pro 订阅）\n"
-        "   1. 在一台有公网的机器上装 CLIProxyAPI: `https://github.com/router-for-me/CLIProxyAPI`\n"
-        "   2. 当前官方版本对 gpt-image-2 有 bug，需打 PR #2962 的补丁（详见那个 PR 描述）\n"
-        "   3. 用 ChatGPT Pro 账号 OAuth 登录：\n"
+        "   1. 在一台有公网的机器上装 CLIProxyAPI **v6.9.35+**: https://github.com/router-for-me/CLIProxyAPI\n"
+        "      （v6.9.35 起含 gpt-image-2 支持，早于此版本需自编译）\n"
+        "   2. 用 ChatGPT Pro 账号 OAuth 登录：\n"
         "      `cli-proxy-api --config your-config.yaml -codex-device-login`\n"
         "      浏览器打开 https://auth.openai.com/codex/device 输入 code\n"
-        "   4. 网关 config.yaml 里的 api-keys 随便设一个（比如 `sk-cgw-<随机串>`），\n"
+        "   3. 网关 config.yaml 里的 api-keys 随便设一个（比如 `sk-cgw-<随机串>`），\n"
         "      把它和网关 URL 给 `python3 generate.py setup` 填进去\n\n"
         f"配置文件会写到 `{CONFIG_DIR}/`（权限 0600），或用环境变量覆盖：\n"
         "   CHATGPT_IMAGE_API_KEY / CHATGPT_IMAGE_API_URL\n"
@@ -237,7 +237,7 @@ def cmd_doctor():
         if e.code == 401:
             print("   → API key 不对。核对一下，跑 `setup` 重新配置。")
         elif e.code == 502 and "stream disconnected" in body:
-            print("   → 网关服务在，但 upstream 画图失败。最常见：CLIProxyAPI 版本没打 PR #2962 补丁。")
+            print("   → 网关服务在，但 upstream 画图失败。请确认 CLIProxyAPI 是 v6.9.35+（含 gpt-image-2 支持）。")
         elif e.code == 404:
             print("   → URL 路径不对。确认 URL 末尾是 `/v1/images/generations`。")
         sys.exit(3)
