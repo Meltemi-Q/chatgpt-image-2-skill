@@ -67,9 +67,12 @@ export CHATGPT_IMAGE_API_URL='https://your-gateway.example.com/v1/images/generat
 
 ## 自建网关（有 ChatGPT Pro 订阅）
 
-1. 装 [CLIProxyAPI](https://github.com/router-for-me/CLIProxyAPI) **v6.9.35 或更新**（含 gpt-image-2 支持，PR #2962 已合并）
-2. OAuth 登录：`cli-proxy-api --config <yaml> -codex-device-login`，浏览器输 device code 用 ChatGPT Pro 账号登
-3. `api-keys` 设一个随机 bearer token 分发给客户端
+跑 `python3 scripts/generate.py install-guide` 看一份**写给 LLM 助手的逐步装机引导**（Mac/Linux 通用，含 release 选包、config 模板、Codex OAuth 登录、systemd / launchd 后台、最终验证）。
+
+或自己读 [CLIProxyAPI README](https://github.com/router-for-me/CLIProxyAPI) 装 **v6.9.35+**（含 gpt-image-2 支持），关键步骤：
+- `cli-proxy-api --config <yaml> -codex-device-login` 拿浏览器登录 link + device code
+- `api-keys` 列表里设一个随机 bearer token 分发给客户端
+- 后台常驻（Linux: systemd-user / Mac: launchd / 偷懒: nohup）
 
 ## 尺寸
 

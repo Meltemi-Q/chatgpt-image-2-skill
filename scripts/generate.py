@@ -150,16 +150,152 @@ def setup_instructions():
         "**A. 使用现有网关**（有人共享了 key）\n"
         "   问对方要 API key 和网关 URL，跑 `python3 generate.py setup` 填进去即可。\n\n"
         "**B. 自建网关**（自己有 ChatGPT Pro 订阅）\n"
-        "   1. 在一台有公网的机器上装 CLIProxyAPI **v6.9.35+**: https://github.com/router-for-me/CLIProxyAPI\n"
-        "      （v6.9.35 起含 gpt-image-2 支持，早于此版本需自编译）\n"
-        "   2. 用 ChatGPT Pro 账号 OAuth 登录：\n"
-        "      `cli-proxy-api --config your-config.yaml -codex-device-login`\n"
-        "      浏览器打开 https://auth.openai.com/codex/device 输入 code\n"
-        "   3. 网关 config.yaml 里的 api-keys 随便设一个（比如 `sk-cgw-<随机串>`），\n"
-        "      把它和网关 URL 给 `python3 generate.py setup` 填进去\n\n"
+        "   跑 `python3 generate.py install-guide` 看针对 LLM 的逐步装机引导（macOS / Linux 通用）。\n"
+        "   或者读 https://github.com/router-for-me/CLIProxyAPI README 自己装（v6.9.35+ 含 gpt-image-2）。\n\n"
         f"配置文件会写到 `{CONFIG_DIR}/`（权限 0600），或用环境变量覆盖：\n"
         "   CHATGPT_IMAGE_API_KEY / CHATGPT_IMAGE_API_URL\n"
     )
+
+
+def cmd_install_guide():
+    """LLM 友好的逐步装机引导。预期由 agent 读完后帮用户执行各步。"""
+    print("""# CLIProxyAPI 装机引导（写给 LLM 助手 / 高级用户）
+
+前提：用户有 **ChatGPT Pro 订阅**（$100/月或 $200/月皆可，但需要 OAuth 能登录的真账号）。
+没有 Pro 不要继续 —— 装好也不能画图。
+
+## Step 1: 选 release 包
+
+参考 https://github.com/router-for-me/CLIProxyAPI/releases/latest
+
+- macOS arm64 (Apple Silicon)：`CLIProxyAPI_<ver>_darwin_arm64.tar.gz`
+- macOS amd64 (Intel)：`CLIProxyAPI_<ver>_darwin_amd64.tar.gz`
+- Linux amd64：`CLIProxyAPI_<ver>_linux_amd64.tar.gz`
+- Linux arm64：`CLIProxyAPI_<ver>_linux_arm64.tar.gz`
+
+**版本要求**：≥ v6.9.35（含 gpt-image-2 支持）。
+
+## Step 2: 解压 + 放好 binary
+
+```bash
+mkdir -p ~/cli-proxy-api && cd ~/cli-proxy-api
+curl -sLO https://github.com/router-for-me/CLIProxyAPI/releases/download/<ver>/<release-tarball>
+tar -xzf <release-tarball>
+chmod +x cli-proxy-api
+./cli-proxy-api -v   # 验证：CLIProxyAPI Version: 6.9.36, ...
+```
+
+## Step 3: 写 config.yaml
+
+随机生成一个 api-key（用户后面要填给 skill 的 setup）：
+
+```yaml
+host: "127.0.0.1"
+port: 8318
+auth-dir: "~/.cli-proxy-api-codex"
+debug: false
+api-keys:
+  - "sk-cgw-<32-byte-hex-random>"   # 用 `openssl rand -hex 24` 生成
+oauth-model-alias:
+  codex:
+    - { name: "gpt-5.4", alias: "cgw-gpt-5.4", fork: true }
+    - { name: "gpt-5.4-mini", alias: "cgw-gpt-5.4-mini", fork: true }
+```
+
+存到 `~/cli-proxy-api/config.yaml`。
+
+## Step 4: ChatGPT Pro OAuth 登录
+
+```bash
+./cli-proxy-api --config ~/cli-proxy-api/config.yaml -codex-device-login
+```
+
+会打印：
+```
+Codex device URL: https://auth.openai.com/codex/device
+Codex device code: XXXX-XXXX
+```
+
+把 URL + code 显示给用户，让他**浏览器打开 URL → 输入 code → 用 ChatGPT Pro 账号登录授权**。
+
+完成后 binary 会自动把 token 写到 `~/.cli-proxy-api-codex/codex-<email>-<plan>.json`，**进程会退出**。
+
+## Step 5: 后台常驻
+
+**Linux（systemd user 单元，免 root）**：
+
+```bash
+mkdir -p ~/.config/systemd/user
+cat > ~/.config/systemd/user/cliproxyapi-codex.service <<'EOF'
+[Unit]
+Description=CLIProxyAPI Codex Gateway
+After=network.target
+
+[Service]
+Type=simple
+ExecStart=%h/cli-proxy-api/cli-proxy-api --config %h/cli-proxy-api/config.yaml
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=default.target
+EOF
+systemctl --user daemon-reload
+systemctl --user enable --now cliproxyapi-codex
+loginctl enable-linger $USER   # 关 ssh 后服务也活着
+```
+
+**macOS（launchd）**：
+
+```bash
+mkdir -p ~/Library/LaunchAgents
+cat > ~/Library/LaunchAgents/com.cliproxyapi.codex.plist <<EOF
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key><string>com.cliproxyapi.codex</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>$HOME/cli-proxy-api/cli-proxy-api</string>
+    <string>--config</string>
+    <string>$HOME/cli-proxy-api/config.yaml</string>
+  </array>
+  <key>RunAtLoad</key><true/>
+  <key>KeepAlive</key><true/>
+</dict>
+</plist>
+EOF
+launchctl load ~/Library/LaunchAgents/com.cliproxyapi.codex.plist
+```
+
+**最简单路线**（无后台需求，前台跑）：
+
+```bash
+cd ~/cli-proxy-api && ./cli-proxy-api --config config.yaml
+```
+
+## Step 6: 验证
+
+```bash
+curl -s 127.0.0.1:8318/healthz   # 应返 {"status":"ok"}
+```
+
+## Step 7: 配置 skill 指向本地网关
+
+```bash
+python3 <SKILL_DIR>/scripts/generate.py setup
+# api_key  → Step 3 生成的那串 sk-cgw-...
+# api_url  → http://127.0.0.1:8318/v1/images/generations
+python3 <SKILL_DIR>/scripts/generate.py doctor
+# 看到 4 级全绿就 OK
+```
+
+完工。
+""")
+
+
+
 
 
 def cmd_setup():
@@ -445,6 +581,9 @@ def main():
             return
         if sub in ("sizes", "list-sizes", "--list-sizes", "-l"):
             cmd_sizes()
+            return
+        if sub in ("install-guide", "install", "guide", "bootstrap"):
+            cmd_install_guide()
             return
 
     parser = argparse.ArgumentParser(
