@@ -172,6 +172,8 @@ def cmd_install_guide():
 - macOS amd64 (Intel)：`CLIProxyAPI_<ver>_darwin_amd64.tar.gz`
 - Linux amd64：`CLIProxyAPI_<ver>_linux_amd64.tar.gz`
 - Linux arm64：`CLIProxyAPI_<ver>_linux_arm64.tar.gz`
+- Windows amd64：`CLIProxyAPI_<ver>_windows_amd64.zip`
+- Windows arm64：`CLIProxyAPI_<ver>_windows_arm64.zip`
 
 **版本要求**：≥ v6.9.35（含 gpt-image-2 支持）。
 
@@ -269,10 +271,30 @@ EOF
 launchctl load ~/Library/LaunchAgents/com.cliproxyapi.codex.plist
 ```
 
-**最简单路线**（无后台需求，前台跑）：
+**Windows（Task Scheduler 或直接前台）**：
+
+```powershell
+# 推荐：Task Scheduler（管理员 PowerShell）
+$action = New-ScheduledTaskAction -Execute "$HOME\cli-proxy-api\cli-proxy-api.exe" `
+  -Argument "--config $HOME\cli-proxy-api\config.yaml"
+$trigger = New-ScheduledTaskTrigger -AtLogOn
+Register-ScheduledTask -TaskName "CLIProxyAPI-Codex" -Action $action -Trigger $trigger `
+  -Description "CLIProxyAPI gateway for gpt-image-2"
+Start-ScheduledTask -TaskName "CLIProxyAPI-Codex"
+
+# 或者 NSSM（如果装了）：
+# nssm install CLIProxyAPI-Codex %USERPROFILE%\cli-proxy-api\cli-proxy-api.exe --config ...
+
+# 偷懒前台跑：
+cd $HOME\cli-proxy-api
+.\cli-proxy-api.exe --config .\config.yaml
+```
+
+**最简单路线**（任何系统，无后台需求，前台跑）：
 
 ```bash
-cd ~/cli-proxy-api && ./cli-proxy-api --config config.yaml
+cd ~/cli-proxy-api && ./cli-proxy-api --config config.yaml   # macOS/Linux
+# Windows: cd $HOME\cli-proxy-api && .\cli-proxy-api.exe --config .\config.yaml
 ```
 
 ## Step 6: 验证
@@ -464,11 +486,17 @@ def cmd_doctor():
 def generate_image(prompt, size=None, batch=1, timeout=None):
     api_key = get_api_key()
     if not api_key:
-        print("## 缺少 API key\n")
-        print("首次使用请先配置网关：\n")
-        print("  python3 generate.py setup")
-        print("\n或直接：")
-        print("  python3 generate.py doctor   # 看当前状态")
+        print("## 缺少 API key — 首次使用需要先配置 CLIProxyAPI 网关\n")
+        print("**给 LLM agent**：用户没装/没配，按下面顺序帮他做：")
+        print("1. `python3 <SKILL_DIR>/scripts/generate.py install-guide` —— 看完整装机引导")
+        print("2. 跟着引导的 7 步带用户装 CPA + 完成 ChatGPT Pro OAuth")
+        print("3. `python3 <SKILL_DIR>/scripts/generate.py setup` —— 把 key/url 填进配置")
+        print("4. `python3 <SKILL_DIR>/scripts/generate.py doctor` —— 4 级验证")
+        print("5. 重新跑用户的画图需求")
+        print("\n**用户直接可用的命令**：")
+        print("  python3 generate.py setup           # 已有 key 跳来填")
+        print("  python3 generate.py install-guide   # 还没装网关")
+        print("  python3 generate.py doctor          # 看当前状态")
         print(setup_instructions())
         sys.exit(2)
 
